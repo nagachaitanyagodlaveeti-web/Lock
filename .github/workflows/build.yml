@@ -18,7 +18,7 @@ jobs:
         with:
           gradle-version: 8.9
       - name: Unpack project
-        run: unzip -q project.zip -d proj
+        run: unzip -q "$(ls *.zip | head -n 1)" -d proj
       - name: Build
         working-directory: proj
         run: gradle assembleDebug --no-daemon
