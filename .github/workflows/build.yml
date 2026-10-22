@@ -1,4 +1,4 @@
-name: Build APK
+name: Build release
 on:
   push:
     branches: [main]
@@ -16,13 +16,29 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.9
+          gradle-version: 8.11.1
       - name: Unpack project
         run: unzip -q "$(ls *.zip | head -n 1)" -d proj
-      - name: Build
-        working-directory: proj
-        run: gradle assembleDebug --no-daemon
-      - name: Publish APK
+      - name: Prepare signing key
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "build-${{ github.run_number }}" proj/app/build/outputs/apk/debug/app-debug.apk --title "AMOLED Lock build ${{ github.run_number }}" --notes "Debug APK"
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$KS_PASS" || { echo "Add the KEYSTORE_PASSWORD secret first"; exit 1; }
+          if gh release download keystore -p upload.jks.gpg -O upload.jks.gpg 2>/dev/null; then
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$KS_PASS" -o upload.jks -d upload.jks.gpg
+          else
+            keytool -genkeypair -keystore upload.jks -storetype PKCS12 -storepass "$KS_PASS" -keypass "$KS_PASS" -alias upload -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=C-lock, O=C-lock, C=IN"
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$KS_PASS" --cipher-algo AES256 -c -o upload.jks.gpg upload.jks
+            gh release create keystore upload.jks.gpg --title "Encrypted signing key - do not delete" --notes "Encrypted with your KEYSTORE_PASSWORD. Do not delete."
+          fi
+          echo "KEYSTORE_FILE=$PWD/upload.jks" >> "$GITHUB_ENV"
+      - name: Build
+        working-directory: proj
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: gradle bundleRelease assembleRelease --no-daemon
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "build-${{ github.run_number }}" proj/app/build/outputs/bundle/release/app-release.aab proj/app/build/outputs/apk/release/app-release.apk --title "C-lock build ${{ github.run_number }}" --notes "app-release.aab is for Google Play. app-release.apk installs on your phone."
